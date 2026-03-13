@@ -5,22 +5,15 @@ using PlcBase.Shared.Utilities;
 
 namespace PlcBase.Base.DTO;
 
-public class ErrorResponse : BaseResponse
+public class ErrorResponse(
+    string message = "",
+    int statusCode = HttpCode.BAD_REQUEST,
+    Dictionary<string, string[]> errors = null
+) : BaseResponse(false, statusCode)
 {
-    public string Message { get; set; }
+    public string Message { get; set; } = message;
 
-    public Dictionary<string, string[]> Errors { get; set; }
-
-    public ErrorResponse(
-        string message = "",
-        int statusCode = HttpCode.BAD_REQUEST,
-        Dictionary<string, string[]> errors = null
-    )
-        : base(false, statusCode)
-    {
-        Message = message;
-        Errors = errors;
-    }
+    public Dictionary<string, string[]> Errors { get; set; } = errors;
 
     public override string ToString()
     {
