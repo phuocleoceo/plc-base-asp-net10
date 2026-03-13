@@ -1,0 +1,89 @@
+using System.Collections.Specialized;
+using System.Web;
+using DotNetCore.CAP;
+using Microsoft.Extensions.Options;
+using PlcBase.Features.User.Entities;
+using PlcBase.Shared.Enums;
+using PlcBase.Shared.Helpers;
+
+namespace PlcBase.Features.Auth.Services;
+
+public class AuthMailService(
+    IOptions<ClientAppSettings> clientAppSettings,
+    IOptions<MailSettings> mailSettings,
+    ICapPublisher capPublisher
+) : IAuthMailService
+{
+    private readonly ClientAppSettings _clientAppSettings = clientAppSettings.Value;
+    private readonly MailSettings _mailSettings = mailSettings.Value;
+
+    public async Task SendMailConfirm(UserAccountEntity userAccount, UserProfileEntity userProfile)
+    {
+        string webClientPath =
+            $"{_clientAppSettings.EndUserAppUrl}/{_clientAppSettings.ConfirmEmailPath}";
+        UriBuilder uriBuilder = new UriBuilder(webClientPath);
+        NameValueCollection query = HttpUtility.ParseQueryString(uriBuilder.Query);
+
+        query["userId"] = userAccount.Id.ToString();
+        query["code"] = userAccount.SecurityCode;
+        uriBuilder.Query = query.ToString() ?? string.Empty;
+
+        string body = await GetBodyFromTemplate("MailConfirm.html");
+        body = body.Replace("{confirm-link}", uriBuilder.ToString());
+
+        await SendMailBackground(
+            new MailContent()
+            {
+                ToEmail = userAccount.Email,
+                Subject = "Confirm email to use Ji PLC",
+                Body = body,
+            }
+        );
+    }
+
+    public async Task SendMailRecoverPassword(
+        UserAccountEntity userAccount,
+        UserProfileEntity userProfile
+    )
+    {
+        string webClientPath =
+            $"{_clientAppSettings.EndUserAppUrl}/{_clientAppSettings.RecoverPasswordPath}";
+        UriBuilder uriBuilder = new UriBuilder(webClientPath);
+        NameValueCollection query = HttpUtility.ParseQueryString(uriBuilder.Query);
+
+        query["userId"] = userAccount.Id.ToString();
+        query["code"] = userAccount.SecurityCode;
+        uriBuilder.Query = query.ToString() ?? string.Empty;
+
+        string body = await GetBodyFromTemplate("MailRecoverPassword.html");
+        body = body.Replace("{recover-link}", uriBuilder.ToString());
+
+        await SendMailBackground(
+            new MailContent()
+            {
+                ToEmail = userAccount.Email,
+                Subject = "Password recovery for your PLC Base account",
+                Body = body,
+            }
+        );
+    }
+
+    private async Task<string> GetBodyFromTemplate(string template)
+    {
+        string path = Path.Combine(_mailSettings.Templates, template);
+        using StreamReader reader = new StreamReader(path);
+        return await reader.ReadToEndAsync();
+    }
+
+    private async Task SendMailBackground(MailContent mailContent)
+    {
+        try
+        {
+            await capPublisher.PublishAsync(WorkerType.SEND_MAIL, mailContent);
+        }
+        catch
+        {
+            // ignored
+        }
+    }
+}
