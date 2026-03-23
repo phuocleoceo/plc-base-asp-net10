@@ -1,4 +1,3 @@
-using PlcBase.Common.Data.Mapper;
 using PlcBase.Common.Filters;
 using PlcBase.Common.Repositories;
 using PlcBase.Common.Services;
@@ -13,7 +12,7 @@ public static class DIExtension
         IConfiguration configuration
     )
     {
-        services.ConfigureAutoMapper();
+        services.AddAutoMapper(_ => { }, typeof(Program).Assembly);
         services.ConfigureAppSetting(configuration);
         services.ConfigureHelperDI();
         services.ConfigureFilterDI();
