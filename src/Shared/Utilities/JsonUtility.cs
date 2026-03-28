@@ -1,44 +1,39 @@
-using Newtonsoft.Json;
+using System.Text.Json;
 
 namespace PlcBase.Shared.Utilities;
 
 public static class JsonUtility
 {
-    public static string Stringify<T>(
-        T obj,
-        Formatting formatting = Formatting.None,
-        JsonSerializerSettings settings = null
-    )
+    // private static readonly JsonSerializerOptions DefaultOptions = new()
+    //     {
+    //         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+    //         PropertyNameCaseInsensitive = true,
+    //     };
+
+    private static readonly JsonSerializerOptions DefaultOptions = new(JsonSerializerOptions.Web);
+
+    private static readonly JsonSerializerOptions IndentedOptions = new(JsonSerializerOptions.Web)
+    {
+        WriteIndented = true,
+    };
+
+    public static string Serialize(object obj, bool indented = false)
     {
         if (obj == null)
         {
             return "";
         }
 
-        try
-        {
-            return JsonConvert.SerializeObject(obj, formatting, settings);
-        }
-        catch (Exception)
-        {
-            return "";
-        }
+        JsonSerializerOptions options = indented ? IndentedOptions : DefaultOptions;
+        return JsonSerializer.Serialize(obj, options);
     }
 
-    public static T Parse<T>(string objString)
+    public static T Deserialize<T>(string objString)
     {
         if (string.IsNullOrWhiteSpace(objString))
         {
             return default;
         }
-
-        try
-        {
-            return JsonConvert.DeserializeObject<T>(objString);
-        }
-        catch (Exception)
-        {
-            return default;
-        }
+        return JsonSerializer.Deserialize<T>(objString, DefaultOptions);
     }
 }

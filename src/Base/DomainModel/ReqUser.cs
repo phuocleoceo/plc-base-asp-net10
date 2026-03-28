@@ -10,6 +10,6 @@ public class ReqUser
 
     public override string ToString()
     {
-        return JsonUtility.Stringify(this);
+        return JsonUtility.Serialize(this);
     }
 }

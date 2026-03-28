@@ -1,5 +1,3 @@
-using Newtonsoft.Json;
-using Newtonsoft.Json.Serialization;
 using PlcBase.Shared.Constants;
 using PlcBase.Shared.Utilities;
 
@@ -22,13 +20,6 @@ public class SuccessResponse<T> : BaseResponse
 
     public override string ToString()
     {
-        return JsonUtility.Stringify(
-            this,
-            Formatting.Indented,
-            new JsonSerializerSettings
-            {
-                ContractResolver = new CamelCasePropertyNamesContractResolver(),
-            }
-        );
+        return JsonUtility.Serialize(this, true);
     }
 }

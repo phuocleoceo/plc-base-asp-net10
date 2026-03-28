@@ -6,29 +6,19 @@ using StackExchange.Redis;
 
 namespace PlcBase.Shared.Helpers;
 
-public class RedisHelper : IRedisHelper
+public class RedisHelper(
+    IDistributedCache redisCache,
+    IOptions<CacheSettings> cacheSettings,
+    IConnectionMultiplexer connectionMultiplexer
+) : IRedisHelper
 {
-    private readonly IConnectionMultiplexer _connectionMultiplexer;
-    private readonly IDistributedCache _redisCache;
-    private readonly CacheSettings _cacheSettings;
-    private readonly IDatabase _redisDatabase;
-
-    public RedisHelper(
-        IDistributedCache redisCache,
-        IOptions<CacheSettings> cacheSettings,
-        IConnectionMultiplexer connectionMultiplexer
-    )
-    {
-        _redisCache = redisCache;
-        _cacheSettings = cacheSettings.Value;
-        _connectionMultiplexer = connectionMultiplexer;
-        _redisDatabase = connectionMultiplexer.GetDatabase();
-    }
+    private readonly CacheSettings _cacheSettings = cacheSettings.Value;
+    private readonly IDatabase _redisDatabase = connectionMultiplexer.GetDatabase();
 
     public async Task Set<T>(string key, T obj)
     {
-        string objStr = JsonUtility.Stringify(obj);
-        await _redisCache.SetStringAsync(key, objStr);
+        string objStr = JsonUtility.Serialize(obj);
+        await redisCache.SetStringAsync(key, objStr);
     }
 
     public async Task SetWithTtl<T>(string key, T obj)
@@ -38,40 +28,40 @@ public class RedisHelper : IRedisHelper
         // Cache auto expire if not access in
         TimeSpan slidingExpires = TimeSpan.FromSeconds(_cacheSettings.Expires / 2);
 
-        DistributedCacheEntryOptions options = new DistributedCacheEntryOptions
+        DistributedCacheEntryOptions options = new()
         {
             AbsoluteExpirationRelativeToNow = expires,
             SlidingExpiration = slidingExpires,
         };
 
-        string objStr = JsonUtility.Stringify(obj);
-        await _redisCache.SetStringAsync(key, objStr, options);
+        string objStr = JsonUtility.Serialize(obj);
+        await redisCache.SetStringAsync(key, objStr, options);
     }
 
     public async Task<T> Get<T>(string key)
     {
-        string obj = await _redisCache.GetStringAsync(key);
-        return JsonUtility.Parse<T>(obj);
+        string obj = await redisCache.GetStringAsync(key);
+        return JsonUtility.Deserialize<T>(obj);
     }
 
     public async Task Clear(string key)
     {
-        await _redisCache.RemoveAsync(key);
+        await redisCache.RemoveAsync(key);
     }
 
     public async Task ClearByPattern(string pattern)
     {
         await foreach (string key in GetKeysMatchPattern(pattern))
         {
-            await _redisCache.RemoveAsync(key);
+            await redisCache.RemoveAsync(key);
         }
     }
 
     private async IAsyncEnumerable<string> GetKeysMatchPattern(string pattern)
     {
-        foreach (EndPoint endpoint in _connectionMultiplexer.GetEndPoints())
+        foreach (EndPoint endpoint in connectionMultiplexer.GetEndPoints())
         {
-            IServer server = _connectionMultiplexer.GetServer(endpoint);
+            IServer server = connectionMultiplexer.GetServer(endpoint);
             await foreach (RedisKey key in server.KeysAsync(pattern: pattern))
             {
                 yield return key.ToString();
@@ -130,7 +120,7 @@ public class RedisHelper : IRedisHelper
         RedisValue[] redisValues = await _redisDatabase.ListRangeAsync(key);
 
         return redisValues.Length > 0
-            ? redisValues.Select(redisValue => JsonUtility.Parse<T>(redisValue)).ToList()
+            ? [.. redisValues.Select(redisValue => JsonUtility.Deserialize<T>(redisValue))]
             : null;
     }
 
@@ -141,9 +131,10 @@ public class RedisHelper : IRedisHelper
         bool clearCurrentList = false
     )
     {
-        RedisValue[] redisValues = items
-            .ConvertAll(item => (RedisValue)JsonUtility.Stringify(item))
-            .ToArray();
+        RedisValue[] redisValues =
+        [
+            .. items.ConvertAll(item => (RedisValue)JsonUtility.Serialize(item)),
+        ];
 
         if (clearCurrentList)
         {
@@ -161,7 +152,7 @@ public class RedisHelper : IRedisHelper
     public async Task<List<T>> GetElementAtListCache<T>(string key, long index)
     {
         RedisValue redisValue = await _redisDatabase.ListGetByIndexAsync(key, index);
-        return !redisValue.IsNull ? JsonUtility.Parse<List<T>>(redisValue) : null;
+        return !redisValue.IsNull ? JsonUtility.Deserialize<List<T>>(redisValue) : null;
     }
 
     public async Task SetElementAtListCache<T>(
@@ -171,7 +162,7 @@ public class RedisHelper : IRedisHelper
         bool hasExpireTime = true
     )
     {
-        await _redisDatabase.ListSetByIndexAsync(key, index, JsonUtility.Stringify(item));
+        await _redisDatabase.ListSetByIndexAsync(key, index, JsonUtility.Serialize(item));
 
         if (hasExpireTime)
         {
@@ -202,7 +193,7 @@ public class RedisHelper : IRedisHelper
             await ClearMapCache(mapKey);
         }
 
-        await _redisDatabase.HashSetAsync(mapKey, itemKey, JsonUtility.Stringify(itemValue));
+        await _redisDatabase.HashSetAsync(mapKey, itemKey, JsonUtility.Serialize(itemValue));
 
         if (hasExpireTime)
         {
@@ -225,9 +216,10 @@ public class RedisHelper : IRedisHelper
             await ClearMapCache(mapKey);
         }
 
-        HashEntry[] entries = items
-            .Select(item => new HashEntry(item.Key, JsonUtility.Stringify(item.Value)))
-            .ToArray();
+        HashEntry[] entries =
+        [
+            .. items.Select(item => new HashEntry(item.Key, JsonUtility.Serialize(item.Value))),
+        ];
 
         await _redisDatabase.HashSetAsync(mapKey, entries);
 
@@ -242,10 +234,10 @@ public class RedisHelper : IRedisHelper
 
     public async Task<Dictionary<string, T>> GetMapCache<T>(string mapKey, HashSet<string> itemKeys)
     {
-        RedisValue[] redisKeys = itemKeys.Select(itemKey => (RedisValue)itemKey).ToArray();
+        RedisValue[] redisKeys = [.. itemKeys.Select(itemKey => (RedisValue)itemKey)];
         RedisValue[] hashEntries = await _redisDatabase.HashGetAsync(mapKey, redisKeys);
 
-        Dictionary<string, T> result = new Dictionary<string, T>();
+        Dictionary<string, T> result = [];
 
         for (int i = 0; i < hashEntries.Length; i++)
         {
@@ -255,7 +247,7 @@ public class RedisHelper : IRedisHelper
                 continue;
             }
 
-            result.Add(itemKeys.ElementAt(i), JsonUtility.Parse<T>(value));
+            result.Add(itemKeys.ElementAt(i), JsonUtility.Deserialize<T>(value));
         }
 
         return result;
@@ -264,7 +256,7 @@ public class RedisHelper : IRedisHelper
     public async Task<T> GetMapCache<T>(string mapKey, string itemKey)
     {
         RedisValue value = await _redisDatabase.HashGetAsync(mapKey, itemKey);
-        return !value.IsNull ? JsonUtility.Parse<T>(value) : default;
+        return !value.IsNull ? JsonUtility.Deserialize<T>(value) : default;
     }
 
     public async Task ClearMapCache(string mapKey)
@@ -279,7 +271,7 @@ public class RedisHelper : IRedisHelper
 
     public async Task RemoveMapCache(string mapKey, IEnumerable<string> itemKeys)
     {
-        RedisValue[] redisKeys = itemKeys.Select(itemKey => (RedisValue)itemKey).ToArray();
+        RedisValue[] redisKeys = [.. itemKeys.Select(itemKey => (RedisValue)itemKey)];
         await _redisDatabase.HashDeleteAsync(mapKey, redisKeys);
     }
 }
